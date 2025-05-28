@@ -1,0 +1,101 @@
+import { Connection, Channel, connect } from 'amqplib';
+import { Street } from '../../types/street';
+import { Logger } from '../logger';
+import { RABBITMQ_URL, QUEUE_NAME, RABBITMQ_CONSTANTS } from '../../config';
+import { IRabbitMQ } from '../../interfaces/rabbitmq.interface';
+import { RabbitMQError } from '../../errors/rabbitmq.error';
+
+export class RabbitMQ implements IRabbitMQ {
+    private static instance: RabbitMQ;
+    private connection: any = null;
+    private channel: Channel | null = null;
+    
+    private readonly RABBITMQ_URL = RABBITMQ_URL;
+    private readonly QUEUE_NAME = QUEUE_NAME;
+
+    private constructor() {}
+
+    public static async getInstance(): Promise<RabbitMQ> {
+        if (!RabbitMQ.instance) {
+            RabbitMQ.instance = new RabbitMQ();
+            await RabbitMQ.instance.connect();
+        }
+        return RabbitMQ.instance;
+    }
+
+    private async connect(): Promise<void> {
+        try {
+            this.connection = await connect(this.RABBITMQ_URL);
+            this.channel = await this.connection.createChannel();
+            await this.channel.assertQueue(this.QUEUE_NAME, RABBITMQ_CONSTANTS.QUEUE_OPTIONS);
+            await this.channel.prefetch(1); // <-- Add this line
+            Logger.info('Connected to RabbitMQ');
+        } catch (error) {
+            Logger.error('RabbitMQ connection error:', error as Error);
+            throw new RabbitMQError('Failed to connect to RabbitMQ', error as Error);
+        }
+    }
+
+    private async connectWithRetry(): Promise<void> {
+        for (let i = 0; i < RABBITMQ_CONSTANTS.MAX_RETRIES; i++) {
+            try {
+                await this.connect();
+                return;
+            } catch (error) {
+                if (i === RABBITMQ_CONSTANTS.MAX_RETRIES - 1) throw error;
+                Logger.warn(`Connection attempt ${i + 1} failed, retrying...`);
+                await new Promise(resolve => setTimeout(resolve, RABBITMQ_CONSTANTS.RECONNECT_DELAY * (i + 1)));
+            }
+        }
+    }
+
+    public async publishStreet(street: Street): Promise<void> {
+        if (!this.channel) throw new RabbitMQError('Channel not initialized');
+        try {
+            this.channel.sendToQueue(
+                this.QUEUE_NAME,
+                Buffer.from(JSON.stringify(street))
+            );
+            Logger.debug('Published street', { streetName: street.street_name });
+        } catch (error) {
+            Logger.error('Error publishing street:', error as Error);
+            throw new RabbitMQError('Failed to publish street', error as Error);
+        }
+    }
+
+    public async consumeStreets(
+        callback: (street: Street) => Promise<void>
+    ): Promise<void> {
+        if (!this.channel) throw new RabbitMQError('Channel not initialized');
+        try {
+            await this.channel.consume(this.QUEUE_NAME, async (msg) => {
+                if (msg) {
+                    try {
+                        const street: Street = JSON.parse(msg.content.toString());
+                        await callback(street);
+                        this.channel?.ack(msg);
+                        Logger.debug('Processed street', { streetName: street.street_name });
+                    } catch (error) {
+                        Logger.error('Error processing message:', error as Error);
+                        this.channel?.nack(msg);
+                    }
+                }
+            });
+            Logger.info('Started consuming streets');
+        } catch (error) {
+            Logger.error('Error setting up consumer:', error as Error);
+            throw new RabbitMQError('Failed to set up consumer', error as Error);
+        }
+    }
+
+    public async close(): Promise<void> {
+        try {
+            if (this.channel) await this.channel.close();
+            if (this.connection) await this.connection.close();
+            Logger.info('RabbitMQ connection closed');
+        } catch (error) {
+            Logger.error('Error closing RabbitMQ connection:', error as Error);
+            throw new RabbitMQError('Failed to close RabbitMQ connection', error as Error);
+        }
+    }
+} 
