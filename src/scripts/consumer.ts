@@ -15,10 +15,10 @@ async function consumeStreets() {
         const rabbitmq = await RabbitMQ.getInstance();
 
         Logger.info('Waiting for streets...');
-
+        
         // Consume messages
         await rabbitmq.consumeStreets(async (street) => {
-            try {
+                try {
                 // Store in MongoDB using singleton
                 await mongo.insertStreet(street);
                 Logger.debug(`Stored street: ${street.street_name}`);
@@ -41,6 +41,7 @@ async function consumeStreets() {
         Logger.error('Error in consumer:', error as Error);
         process.exit(1);
     }
+
 }
 
 consumeStreets(); 

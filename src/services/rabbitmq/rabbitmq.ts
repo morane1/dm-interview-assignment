@@ -4,6 +4,7 @@ import { Logger } from '../logger';
 import { RABBITMQ_URL, QUEUE_NAME, RABBITMQ_CONSTANTS } from '../../config';
 import { IRabbitMQ } from '../../interfaces/rabbitmq.interface';
 import { RabbitMQError } from '../../errors/rabbitmq.error';
+import { PREFETCH_COUNT } from '../../config/config';
 
 export class RabbitMQ implements IRabbitMQ {
     private static instance: RabbitMQ;
@@ -18,7 +19,7 @@ export class RabbitMQ implements IRabbitMQ {
     public static async getInstance(): Promise<RabbitMQ> {
         if (!RabbitMQ.instance) {
             RabbitMQ.instance = new RabbitMQ();
-            await RabbitMQ.instance.connect();
+            await RabbitMQ.instance.connectWithRetry();
         }
         return RabbitMQ.instance;
     }
@@ -28,7 +29,7 @@ export class RabbitMQ implements IRabbitMQ {
             this.connection = await connect(this.RABBITMQ_URL);
             this.channel = await this.connection.createChannel();
             await this.channel.assertQueue(this.QUEUE_NAME, RABBITMQ_CONSTANTS.QUEUE_OPTIONS);
-            await this.channel.prefetch(1); // <-- Add this line
+            await this.channel.prefetch(PREFETCH_COUNT);
             Logger.info('Connected to RabbitMQ');
         } catch (error) {
             Logger.error('RabbitMQ connection error:', error as Error);

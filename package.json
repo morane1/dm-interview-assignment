@@ -25,7 +25,8 @@
     "kafkajs": "^2.2.3",
     "lodash": "^4.17.21",
     "mongodb": "^5.9.2",
-    "mysql2": "^3.1.2"
+    "mysql2": "^3.1.2",
+    "p-limit": "^6.2.0"
   },
   "devDependencies": {
     "@google-cloud/translate": "^7.1.0",
