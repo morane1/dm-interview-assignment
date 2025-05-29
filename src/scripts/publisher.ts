@@ -19,14 +19,13 @@ async function publishStreets(cityName: city) {
         const { streets } = await StreetsService.getStreetsInCity(cityName);
         Logger.info(`Found ${streets.length} streets in ${cityName}`);
 
-        // Get full street info and publish each street
+        // Publish each street
         for (let i = 0; i < streets.length; i += CONCURRENCY_LIMIT) {
             const batch = streets.slice(i, i + CONCURRENCY_LIMIT);
             await Promise.allSettled(
                 batch.map(async (street) => {
                     try {
-                        const fullStreetInfo = await StreetsService.getStreetInfoById(street.streetId);
-                        await rabbitmq.publishStreet(fullStreetInfo);
+                        await rabbitmq.publishStreet(street); // Directly publish the street object
                     } catch (error) {
                         Logger.error(`Failed to publish street with ID ${street.streetId}:`, error as Error);
                     }

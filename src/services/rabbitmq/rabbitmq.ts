@@ -4,12 +4,13 @@ import { Logger } from '../logger';
 import { RABBITMQ_URL, QUEUE_NAME, RABBITMQ_CONSTANTS } from '../../config';
 import { IRabbitMQ } from '../../interfaces/rabbitmq.interface';
 import { RabbitMQError } from '../../errors/rabbitmq.error';
-import { PREFETCH_COUNT } from '../../config/config';
+import { MAX_RECONNECT_ATTEMPTS, PREFETCH_COUNT } from '../../config/config';
 
 export class RabbitMQ implements IRabbitMQ {
     private static instance: RabbitMQ;
     private connection: any = null;
     private channel: Channel | null = null;
+    private reconnectAttempts = 0;
     
     private readonly RABBITMQ_URL = RABBITMQ_URL;
     private readonly QUEUE_NAME = QUEUE_NAME;
@@ -25,17 +26,66 @@ export class RabbitMQ implements IRabbitMQ {
     }
 
     private async connect(): Promise<void> {
-        try {
-            this.connection = await connect(this.RABBITMQ_URL);
-            this.channel = await this.connection.createChannel();
-            await this.channel.assertQueue(this.QUEUE_NAME, RABBITMQ_CONSTANTS.QUEUE_OPTIONS);
-            await this.channel.prefetch(PREFETCH_COUNT);
-            Logger.info('Connected to RabbitMQ');
-        } catch (error) {
-            Logger.error('RabbitMQ connection error:', error as Error);
-            throw new RabbitMQError('Failed to connect to RabbitMQ', error as Error);
+    try {
+        this.connection = await connect(this.RABBITMQ_URL);
+        this.channel = await this.connection.createChannel();
+        await this.channel.assertQueue(this.QUEUE_NAME, RABBITMQ_CONSTANTS.QUEUE_OPTIONS);
+        await this.channel.prefetch(PREFETCH_COUNT);
+
+        this.listenToEvents();
+
+        Logger.info('Connected to RabbitMQ');
+    } catch (error) {
+        Logger.error('RabbitMQ connection error:', error as Error);
+        throw new RabbitMQError('Failed to connect to RabbitMQ', error as Error);
+    }
+}
+
+    private async listenToEvents(): Promise<void> {
+     // Add listeners for errors and close events
+        this.connection.on('error', (err) => {
+            Logger.error('RabbitMQ connection error:', err);
+            this.handleReconnect();
+        });
+        this.connection.on('close', () => {
+            Logger.warn('RabbitMQ connection closed');
+            this.handleReconnect();
+        });
+        this.channel.on('error', (err) => {
+            Logger.error('RabbitMQ channel error:', err);
+            this.handleReconnect();
+        });
+        this.channel.on('close', () => {
+            Logger.warn('RabbitMQ channel closed');
+            this.handleReconnect();
+        });
+    }
+
+    private async handleReconnect() {
+    Logger.warn('Attempting to reconnect to RabbitMQ...');
+    try {
+        if (this.channel) {
+            await this.channel.close().catch(() => {});
+            this.channel = null;
+        }
+        if (this.connection) {
+            await this.connection.close().catch(() => {});
+            this.connection = null;
+        }
+        await this.connectWithRetry();
+        this.reconnectAttempts = 0; // Reset on success
+        Logger.info('Reconnected to RabbitMQ');
+    } catch (error) {
+        this.reconnectAttempts++;
+        Logger.error('RabbitMQ reconnection failed:', error as Error);
+        if (this.reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+            Logger.error('Max RabbitMQ reconnection attempts reached. Exiting process.');
+            process.exit(1);
+        } else {
+            setTimeout(() => this.handleReconnect(), 5000);
         }
     }
+}
 
     private async connectWithRetry(): Promise<void> {
         for (let i = 0; i < RABBITMQ_CONSTANTS.MAX_RETRIES; i++) {

@@ -33,7 +33,7 @@ export class MongoDB implements IMongoDB {
             const db = this.client.db(this.DB_NAME);
             this.collection = db.collection<Street>(this.COLLECTION_NAME);
             // Ensure unique index on street_code
-        await this.collection.createIndex({ street_code: 1 }, { unique: true });
+        await this.collection.createIndex({ streetId: 1 }, { unique: true });
             Logger.info('Connected to MongoDB');
         } catch (error) {
             Logger.error('MongoDB connection error:', error as Error);
@@ -44,7 +44,7 @@ export class MongoDB implements IMongoDB {
     public async insertStreet(street: Street): Promise<void> {
         try {
             await this.collection.updateOne(
-            { street_code: street.street_code }, // match by unique field
+            { streetId: street.streetId }, // match by unique field
             { $set: street },                    // update all fields
             { upsert: true }                     // insert if not exists
         );
